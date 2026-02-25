@@ -1,24 +1,22 @@
-﻿using System.Text;
+﻿using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
 
 namespace WpfApp2
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
-        private Button[,] tiles = new Button[4, 4];
-        private int emptyRow = 3; 
-        private int emptyCol = 3;
+        public Button[,] tiles = new Button[4, 4];
+        public int emptyRow = 3;
+        public int emptyCol = 3;
+
+        private bool isShuffling = false;
+        private VictoryCheck checker = new VictoryCheck();
+        private GenerateList generator = new GenerateList();
+
         public MainWindow()
         {
             InitializeComponent();
@@ -27,86 +25,189 @@ namespace WpfApp2
 
         private void CreatePuzzle()
         {
-            int number = 1;
+            PuzzleGrid.Children.Clear();
+
+            int[] board = generator.GenerateSolvableGame();
+            int index = 0;
+            if (board.Length != 16) throw new Exception("Generator returned invalid board length!");
+
             for (int y = 0; y < 4; y++)
             {
                 for (int x = 0; x < 4; x++)
                 {
-                    if(y == 3 && x == 3)
+                    int value = board[index++];
+
+                    if (value == 0)
                     {
-                        break;
+                        tiles[y, x] = null;
+                        emptyRow = y;
+                        emptyCol = x;
+                        continue;
                     }
+
                     Button b = new Button();
-                    //b.Height = 80;
-                    //b.Width = 80;
-                    b.Content = number.ToString();
+                    b.Content = value.ToString();
                     b.Background = Brushes.AntiqueWhite;
                     b.FontFamily = new FontFamily("Bahnschrift SemiLight Condensed");
-                    //b.FontFamily = new FontFamily("Freestyle Script");
                     b.FontSize = 24;
                     b.Click += Tile_Click;
+
                     Grid.SetRow(b, y);
                     Grid.SetColumn(b, x);
                     PuzzleGrid.Children.Add(b);
+
                     tiles[y, x] = b;
-                    number++;
                 }
             }
         }
+
         private void Tile_Click(object sender, RoutedEventArgs e)
         {
             Button clicked = sender as Button;
             int y = Grid.GetRow(clicked);
             int x = Grid.GetColumn(clicked);
-            bool isAdjacent = 
+
+            bool isAdjacent =
                 (y == emptyRow && Math.Abs(x - emptyCol) == 1) ||
                 (x == emptyCol && Math.Abs(y - emptyRow) == 1);
+
             if (!isAdjacent)
-            {
                 return;
-            }
+
             Grid.SetRow(clicked, emptyRow);
             Grid.SetColumn(clicked, emptyCol);
+
+            tiles[emptyRow, emptyCol] = clicked;
+            tiles[y, x] = null;
+
+            emptyRow = y;
+            emptyCol = x;
+
+            if (!isShuffling && checker.IsSolved(tiles))
+            {
+                MessageBox.Show("Wygrałeś!");
+            }
+        }
+
+        private void MoveTileInternal(Button tile)
+        {
+            int y = Grid.GetRow(tile);
+            int x = Grid.GetColumn(tile);
+
+            Grid.SetRow(tile, emptyRow);
+            Grid.SetColumn(tile, emptyCol);
+
+            tiles[emptyRow, emptyCol] = tile;
+            tiles[y, x] = null;
+
             emptyRow = y;
             emptyCol = x;
         }
-        private void Shufle()
+
+        private List<Button> GetMovableTiles()
         {
+            List<Button> list = new List<Button>();
+
+            foreach (Button b in PuzzleGrid.Children)
+            {
+                int y = Grid.GetRow(b);
+                int x = Grid.GetColumn(b);
+
+                bool isAdjacent =
+                    (y == emptyRow && Math.Abs(x - emptyCol) == 1) ||
+                    (x == emptyCol && Math.Abs(y - emptyRow) == 1);
+
+                if (isAdjacent)
+                    list.Add(b);
+            }
+
+            return list;
+        }
+
+        private List<int> GetBoardState()
+        {
+            List<int> state = new List<int>();
+
+            for (int y = 0; y < 4; y++)
+            {
+                for (int x = 0; x < 4; x++)
+                {
+                    if (tiles[y, x] == null)
+                    {
+                        state.Add(0);
+                    }
+                    else
+                    {
+                        state.Add(int.Parse(tiles[y, x].Content.ToString()));
+                    }
+                }
+            }
+
+            return state;
+        }
+
+        private int CountInversions(List<int> state)
+        {
+            int inv = 0;
+
+            for (int i = 0; i < state.Count; i++)
+            {
+                for (int j = i + 1; j < state.Count; j++)
+                {
+                    if (state[i] != 0 && state[j] != 0 && state[i] > state[j])
+                        inv++;
+                }
+            }
+
+            return inv;
+        }
+
+        private bool IsSolvable()
+        {
+            var state = GetBoardState();
+            int inversions = CountInversions(state);
+            int emptyRowFromBottom = 4 - emptyRow;
+
+            return (inversions + emptyRowFromBottom) % 2 == 0;
+        }
+
+        private async Task ShuffleOnceAsync()
+        {
+            isShuffling = true;
             Random r = new Random();
 
             for (int i = 0; i < 200; i++)
             {
                 var neighbors = GetMovableTiles();
                 if (neighbors.Count == 0)
-                {
                     continue;
-                }
+
                 Button tile = neighbors[r.Next(neighbors.Count)];
-                Tile_Click(tile, null);
+                MoveTileInternal(tile);
+
+                await Task.Delay(1);
             }
-        }
-        private List<Button> GetMovableTiles()
-        {
-            List<Button> list = new List<Button>();
-            foreach (Button b in PuzzleGrid.Children)
-            {
-                int y = Grid.GetRow(b);
-                int x = Grid.GetColumn(b);
-                bool isAdjesent =
-                    (y == emptyRow && Math.Abs(x - emptyCol) == 1) ||
-                    (x == emptyCol && Math.Abs(y - emptyRow) == 1);
-                if (isAdjesent)
-                {
-                    list.Add(b);
-                }
-            }
-            return list;
-            
+
+            isShuffling = false;
         }
 
-        private void ShuffleButton_Click(object sender, RoutedEventArgs e)
+        private async Task ShuffleAsync()
         {
-            Shufle();
+            await ShuffleOnceAsync();
+            bool CanBeSolved = IsSolvable();
+            if (!CanBeSolved)
+            {
+                await ShuffleOnceAsync();
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        private async void ShuffleButton_Click(object sender, RoutedEventArgs e)
+        {
+            await ShuffleAsync();
         }
     }
 }
